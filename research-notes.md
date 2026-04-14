@@ -192,3 +192,23 @@ The persistence of this behavior after 5,000,000 steps of training suggests a fu
 
 **Conclusion:** With state-awareness (5D obs), temporal memory (RNN persistence), and unit-correct friction, the agent is now architecturally equipped to solve the "barcode" problem and move toward stable, institutional-grade allocation.
 
+---
+
+## VIII. Sprint: Institutional Pacing & The "Bang-Bang" Loophole
+**Objective:** Eliminate binary "Bang-Bang" control by enforcing a Delta-Action Space and Quadratic Market Impact, forcing the agent to learn smooth institutional scaling.
+
+### A. The "Bang-Bang" Loophole & Square Root Friction
+*   **The Problem:** Despite prior fixes, the agent achieved a 0.93 OOS Sharpe Ratio by mathematically exploiting the Square Root Law of market impact (`0.05 * math.sqrt(turnover)`). The agent realized that dumping 100% of the portfolio at once was cheaper on a per-unit basis than scaling out smoothly over 10 days. This resulted in binary "Bang-Bang" control (0% or 100% allocations), which is unfeasible for institutional block sizing.
+*   **The Solution:** We replaced the square root friction with a **Quadratic Market Impact** formula: `slippage = (0.0050 * turnover) + (5.0 * (turnover ** 2))`. This introduces a devastating penalty for large block trades, making the marginal cost of slippage increase exponentially with trade size.
+
+### B. Delta-Action Space Constraint
+*   **The Problem:** The agent's action space allowed it to directly output an absolute target weight between `[0.0, 1.0]`.
+*   **The Solution:** Migrated the action space to a bounded delta: `Box(low=-0.1, high=0.1)`. The agent can now only shift its allocation by a maximum of 10% per day (`stock_weight = np.clip(previous_weight + action, 0.0, 1.0)`). This acts as a hard mechanical constraint guaranteeing inertia.
+
+### C. Architectural Audit & Reward Function Overhaul
+Prior to a 5M step training run, an architectural audit revealed four critical RL misalignment issues that would have prevented the agent from learning institutional pacing under the new constraints:
+1.  **"Fear of Success" Reward Misalignment:** The continuous mean-variance reward (`net_return - 2.0 * (net_return ** 2)`) was actively punishing high absolute returns in Z-score space (e.g., a return of 2.0 yielded a reward of -6.0). We updated the reward to maximize raw `net_return` directly, letting the quadratic transaction costs handle the pacing and risk aversion.
+2.  **PPO Action Noise Mismatch:** Stable Baselines3 PPO defaults to an initial exploration standard deviation of `1.0`. With bounds of `[-0.1, 0.1]`, almost all explored actions were clipped to the extremes. We fixed this by initializing PPO with `policy_kwargs=dict(log_std_init=-3.0)`, reducing the initial exploration noise to a scale appropriate for the delta action space.
+3.  **Boundary Saturation ("Sticky Edges"):** When the agent hit the 0.0 or 1.0 boundaries and continued to push past them, the environment clipped the values, but the PPO network's internal pre-activations saturated. This caused delayed reactions during regime shifts. We implemented a `boundary_penalty` in the reward function that quadratically penalizes the agent for attempting to allocate beyond 0% or 100%.
+4.  **Diluted Friction Calibration:** The initial quadratic coefficient (`0.10`) only resulted in a 15bps maximum penalty given the new 0.1 action limit. We scaled the coefficient to `5.0`, ensuring a max delta step costs a punishing 500bps, mathematically forcing the agent to prefer smooth, incremental execution.
+

@@ -50,7 +50,7 @@ def evaluate():
             
             # Agent prediction
             action, _ = agent.predict(state, deterministic=True)
-            stock_weight = float(action[0])
+            stock_weight = np.clip(previous_weight + float(action[0]), 0.0, 1.0)
             bond_weight = 1.0 - stock_weight
             
             # Realized returns from OOS data
@@ -62,7 +62,7 @@ def evaluate():
             
             # SQRT Law Friction
             turnover = abs(stock_weight - previous_weight)
-            slippage = 0.0010 * math.sqrt(turnover)
+            slippage = (0.0050 * turnover) + (5.0 * (turnover ** 2))
             net_ret = raw_ret - slippage
             
             # Benchmark (60/40)

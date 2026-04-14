@@ -23,7 +23,8 @@ def train_agent():
         learning_rate=3e-4, 
         ent_coef=0.01,
         batch_size=64,
-        device=device 
+        device=device,
+        policy_kwargs=dict(log_std_init=-3.0)
     )
 
     # 3. Scale Compute with Checkpointing

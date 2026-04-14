@@ -1,28 +1,23 @@
-# PROJECT CONTEXT: Macroeconomic World Model (Institutional POC)
+# PROJECT CONTEXT: World Model Audit & Final State Fixes
 
 ## 1. THE CORE MISSION
-Upgrade the V-M-C (Vision-Memory-Controller) architecture to institutional standards. We have successfully implemented a 7D causal data pipeline, an 8D $\beta$-VAE, a stochastic RSSM for Monte Carlo hallucination, and a PPO agent penalized by 15bps transaction friction. 
+We are executing a final bug-fixing sprint based on an architectural audit before launching our 5,000,000 timestep background run. We need to fix a critical RNN memory leak, eliminate a microscopic look-ahead bias in the data pipeline, and correct a mathematical unit mismatch between Z-scored returns and absolute friction penalties.
 
-*The current objective is to enforce Out-of-Sample (OOS) backtesting rigor and implement non-linear market impact before initiating a 5,000,000 timestep compute scaling run.*
+## 2. CURRENT FOCUS: AUDIT EXECUTION
 
-## 2. CURRENT FOCUS: OOS FIREWALL & ADVANCED FRICTION
-We must update the codebase to ensure the agent is completely blinded to post-2018 data during training, and we must make the trading environment brutally realistic.
+**Task 1: RNN Memory Persistence (`src/env/portfolio_env.py`)**
+* The environment's RSSM is currently resetting its hidden state to `None` on every step. 
+* **Fix:** Initialize `self.h = None` inside `reset()`. Inside `step()`, capture and pass the hidden state: `mu, logvar, self.h = self.rssm(z_t, self.h)`.
 
-**Task 1: The OOS Data Firewall (`src/data/fetcher.py` & Training Scripts)**
-* Introduce a strict chronological split. 
-* **Training Set:** 1993-01-01 to 2018-12-31. All training scripts (`train_vae.py`, `train_lstm.py`, `train_agent.py`) must ONLY ingest this data.
-* **OOS Test Set:** 2019-01-01 to Present. This data is strictly quarantined for the final `evaluate.py` backtest.
-* Ensure the 252-day Rolling Z-Score normalization does not leak data across the 2018/2019 boundary.
+**Task 2: Causal Normalization Shadow Bias (`src/data/fetcher.py`)**
+* The 252-day rolling Z-score includes the current day, leaking 1/252th of future data.
+* **Fix:** Shift the rolling window calculation by 1 day to ensure absolute causality: `rolling_mean = df.shift(1).rolling(window=window_size).mean()`. Apply this to standard deviation as well.
 
-**Task 2: Non-Linear Market Impact (`src/env/portfolio_env.py`)**
-* Flat 15bps transaction costs are unrealistic for institutional block trades.
-* Implement the Square Root Law of Market Impact. The slippage penalty must scale non-linearly with the turnover. 
-* Formula concept: `slippage = base_bps * sqrt(turnover)`. Small allocation adjustments should incur minimal friction; dumping 100% of the portfolio in a single day should trigger massive slippage penalties.
+**Task 3: Unit-Correct Friction & Noise (`src/env/portfolio_env.py`)**
+* **Noise:** Inject `+ torch.randn_like(z_next) * 0.05` to the next state hallucination inside `step()` to match the evaluation engine.
+* **Friction Mismatch:** Because the returns from the VAE/RSSM are in Z-score space (standard deviations), a friction penalty of `0.0010` is mathematically invisible to the agent.
+* **Fix:** Update the slippage multiplier from `0.0010` to `0.05` to scale it properly into Z-score space: `slippage = 0.05 * math.sqrt(turnover)`.
 
-**Task 3: Compute Scaling (`src/train_agent.py`)**
-* Update the PPO agent to train for `5,000,000` timesteps. 
-* Implement Checkpointing (`stable_baselines3.common.callbacks.CheckpointCallback`) to save the agent's weights every 500,000 steps, preventing total loss if the server crashes during the massive run.
-
-## 3. ENGINEERING CONSTRAINTS & RULES
-* **No Data Leakage:** The 2019-2024 data must not touch the VAE, the RSSM, or the RL Agent during training.
-* **Code Quality:** Production-ready PyTorch. Optimize for a 6GB VRAM ceiling. Do not hallucinate external libraries outside of the current stack.
+## 3. ENGINEERING CONSTRAINTS
+* Apply these fixes directly and concisely. 
+* Do not alter the Mean-Variance reward structure established in the previous sprint, only update the slippage coefficient.

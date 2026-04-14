@@ -95,8 +95,9 @@ class DataFetcher:
         # Zt = (Xt - mu_trailing) / sigma_trailing
         print("Applying Causal Rolling Z-Score (252-day window)...")
         window_size = 252
-        rolling_mean = df.rolling(window=window_size).mean()
-        rolling_std = df.rolling(window=window_size).std()
+        # Shifted by 1 to ensure parameters (mean/std) only use data available BEFORE today
+        rolling_mean = df.shift(1).rolling(window=window_size).mean()
+        rolling_std = df.shift(1).rolling(window=window_size).std()
         
         # Apply normalization
         df_normalized = (df - rolling_mean) / rolling_std

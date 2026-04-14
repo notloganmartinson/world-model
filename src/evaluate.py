@@ -45,7 +45,8 @@ def evaluate():
         z_oos, _ = vae.encode(oos_data)
         
         for t in range(len(z_oos)):
-            state = z_oos[t].cpu().numpy()
+            # Proprioception: Append previous weight to 4D latent vector
+            state = np.append(z_oos[t].cpu().numpy(), [previous_weight]).astype(np.float32)
             
             # Agent prediction
             action, _ = agent.predict(state, deterministic=True)

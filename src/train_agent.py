@@ -9,7 +9,7 @@ def train_agent():
     
     # 1. Instantiate the dreamed environment
     # Every step uses LSTM prediction and VAE decoding
-    env = PortfolioEnv(max_steps=252) # episode lasts 1 trading year (252 steps)
+    env = PortfolioEnv(max_steps=60) # episode lasts 1 trading quarter (60 steps)
 
     # 2. Setup PPO Agent
     # Updated to use 'cuda' if available for 5M step scaling

@@ -32,7 +32,7 @@ class StochasticRSSM: # A stochastic Recurrent State Space Model (RSSM) designed
     def __init__(self, input_size, hidden_size, num_layers, output_size):
     def reparameterize(self, mu, logvar) -> torch.Tensor: # Reparameterization trick: sample from N(mu, sigma^2).
     def forward(self, x, h) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: # Forward pass.
-    def hallucinate(self, z_start, steps) -> torch.Tensor: # Autoregressively generate synthetic economic futures (Monte Carlo hallucination).
+    def hallucinate(self, z_start, steps, noise_scale) -> torch.Tensor: # Autoregressively generate synthetic economic futures (Monte Carlo hallucination).
 
 # src/models/vae.py
 class VAE: # A production-grade Variational Autoencoder (VAE) for compressing macroeconomic states.
@@ -51,7 +51,8 @@ class PortfolioEnv: # A portfolio environment that lives inside the 'dream' of t
 
 # src/data/fetcher.py
 class DataFetcher: # Fetches daily SPY/VUSTX/^VIX and monthly/daily FRED data (FEDFUNDS, CPIAUCSL, T10Y2Y, BAMLH0A0HYM2),
-    def __init__(self, start_date):
+    def __init__(self, start_date, end_date):
+    def split_data(self, df, split_date): # Splits the normalized dataframe into Training and OOS Testing sets.
     def fetch_fred_data(self, series_id):
     def fetch_data(self):
     def get_normalized_tensor(self, df):

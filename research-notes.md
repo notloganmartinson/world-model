@@ -124,9 +124,71 @@ The introduction of friction caused the agent to adopt an aggressive "Hold" stra
 
 While mathematically optimal given its current training scope, this blunt binary behavior indicates under-training. A training envelope of 250,000 timesteps is insufficient for an agent to learn smooth, macro-aware transition curves in a highly stochastic 8D environment.
 
-## IV. Conclusion & Future Work
-This iteration proves that a locally hosted, VRAM-constrained World Model can successfully generate valid stochastic macroeconomic simulations and train reinforcement learning agents that respect institutional constraints. 
+## V. Scaling and the Out-of-Sample (OOS) Firewall (Revision v3.0)
 
-**Next Steps:**
-1.  **Compute Scaling:** Increase agent training to >2,000,000 timesteps to smooth policy gradients and eliminate binary panic-selling.
-2.  **Non-Linear Friction:** Introduce slippage mechanics that scale non-linearly with the magnitude of the allocation shift, mimicking market impact costs for large institutional block trades.
+**Project:** Macroeconomic World Model via V-M-C Architecture (Institutional Rigor)
+**Revision:** v3.0 (OOS Data Firewall, Non-Linear Impact, and Compute Scaling)
+
+### A. The OOS Data Firewall & Latent Optimization
+**Objective:** Eliminate data leakage and optimize the latent representation for institutional-grade backtesting.
+* **Firewall Implementation:** A strict chronological split was enforced at the data ingestion layer. The training set was restricted to 1993-01-01 through 2018-12-31. The 2019-Present period was quarantined as an Out-of-Sample (OOS) test set. 
+* **Causal Normalization:** To prevent look-ahead bias, the 252-day Rolling Z-Score normalization was applied to the full dataset *prior* to the split. This ensures the initial window of the OOS set is grounded in the trailing distribution of the training set without leaking future information back to the V-Model or M-Model.
+* **4D Latent Compression:** The latent dimension was reduced from 8D to **4D**. This provides a more aggressive compression of the 7D input space, forcing the V-Model to extract more robust "regime-level" features and simplifying the state space for the RL agent.
+* **GPU Acceleration:** The entire pipeline was refactored for full GPU (CUDA) support, including the environment's VAE/RSSM inference loop, to support massive compute scaling.
+
+### B. Non-Linear Market Impact
+**Objective:** Replace "toy" flat transaction costs with a realistic institutional friction model.
+* **Implementation:** We implemented the **Square Root Law of Market Impact**. 
+* **Formula:** $Slippage = \gamma \cdot \sqrt{Turnover}$, where $\gamma = 0.0010$ (10bps base multiplier).
+* **Rationale:** This model ensures that small rebalances incur minimal friction, while large, abrupt shifts in allocation (e.g., a 0% to 100% "slam") trigger exponentially higher slippage penalties, mimicking the liquidity constraints of a large institutional block trade.
+
+### C. Compute Scaling & Checkpointing
+**Objective:** Increase the agent's exposure to the stochastic "dream" environment to stabilize policy gradients.
+* **Scaling:** PPO training was increased from 250,000 to **5,000,000 timesteps**.
+* **Persistence:** `CheckpointCallback` was integrated to save model weights at 500,000-step intervals, ensuring fault tolerance during long-running compute phases.
+
+---
+
+## VI. Results: The OOS Failure and the "Barcode" Problem
+
+Upon evaluating the agent on the 2019–2024 OOS dataset, the model exhibited a significant failure in allocation logic. Despite the 5M step training run and the introduction of non-linear friction, the agent achieved an **OOS Sharpe Ratio of -0.52**, severely underperforming the 60/40 benchmark (-0.10).
+
+**Key Behavioral Observations:**
+1. **High-Frequency Churn ("The Barcode"):** The agent's allocation chart resembles a "barcode," characterized by rapid, near-daily oscillations between 0% and 100% equity exposure. The agent is effectively "churning" the portfolio, incinerating its capital through cumulative transaction fees—a phenomenon described as "death by a thousand cuts."
+2. **Inertia Blindness:** The agent demonstrates no concept of "holding" a position. It treats each trading day as an independent optimization problem, failing to account for the path-dependent cost of its previous allocation.
+3. **Volatility Induced Panic:** During the March 2020 COVID-19 crash, the agent exhibited extreme "panic-selling," exiting the market at the local bottom and incurring massive slippage costs, only to "barcode" back into equities during the subsequent recovery, missing the primary rebound.
+
+The persistence of this behavior after 5,000,000 steps of training suggests a fundamental architectural gap in how the agent perceives its own state and the cost of movement within the latent economy.
+
+---
+
+## VII. Sprint: Elite Quant Audit & State-Aware Proprioception
+**Objective:** Solve "Barcode" churn and OOS failure via state-aware proprioception, continuous reward gradients, and RNN memory persistence.
+
+### A. Observation Proprioception (Solving Inertia Blindness)
+*   **The Problem:** The agent was "blind" to its current portfolio position. In `v2.0`, the observation was purely the 4D latent economic state. Without knowing its `previous_weight`, the agent could not calculate the cost of its next action until *after* the reward was processed, leading to erratic "barcode" oscillations.
+*   **The Solution:** Expanded the observation space from **4D to 5D**. We now concatenate the agent's current `stock_weight` to the 4D latent vector. This grants the agent "proprioception"—the ability to sense its own position—allowing it to internalize transaction friction as a structural constraint of its state, not just a random penalty.
+
+### B. RNN Memory Persistence (Fixing the Temporal Leak)
+*   **The Problem:** An architectural audit revealed that the `PortfolioEnv` was resetting the RSSM's hidden state (`h`) to `None` on every single `step()`. 
+*   **The Impact:** This effectively neutralized the "Memory" in the V-M-C framework. The agent was navigating a Markovian "mood" rather than a temporal sequence, causing the "dreams" to lose historical context and drift.
+*   **The Fix:** Implemented hidden state persistence. `self.h` is now initialized in `reset()` and passed/updated during each `step()`, ensuring the RSSM maintains a contiguous temporal "memory" throughout the 60-day trading horizon.
+
+### C. Continuous Mean-Variance Reward
+*   **The Problem:** The previous 2.0x downside penalty was a non-differentiable step function. This caused the agent to "panic" at the zero-bound, leading to binary all-in/all-out behavior.
+*   **The Solution:** Implemented a symmetric, continuous **Mean-Variance Objective**:
+    *   $Reward = Net\_Return - (\lambda \cdot Net\_Return^2)$
+    *   $\lambda = 2.0$ (Risk Aversion Coefficient).
+    *   This provides a smooth, differentiable gradient that penalizes volatility (variance) in both directions, encouraging the agent to seek stable, low-volatility growth paths.
+
+### D. Unit-Correct Friction & Causal Shadowing
+*   **Unit-Correct Friction:** In Z-score space (standard deviations), a flat 10bps penalty ($0.0010$) is mathematically microscopic. We scaled the slippage multiplier to **0.05** to ensure transaction costs are significant relative to Z-scored returns.
+*   **Absolute Causality:** Fixed a "micro-leak" in the `DataFetcher`. The rolling Z-score was shifted by **1 day** ($df.shift(1)$) to ensure that the normalization parameters (mean/std) for today's data are calculated using *only* information available before today's close.
+*   **Grounding Noise:** Synchronized the environment's `step()` logic with the evaluation engine by injecting **0.05 grounding noise** into the latent hallucinations. This prevents the agent from over-optimizing for "perfect" dreams and forces it to build a policy robust to stochastic shocks.
+
+### E. Horizon Stabilization
+*   **The Fix:** Reduced the environment's `max_steps` from 252 (1 year) to **60 (1 quarter)**. 
+*   **Rationale:** Shortening the "dream" horizon prevents the autoregressive RSSM from drifting into unphysical extreme states (covariate shift) while providing enough temporal depth for the agent to learn quarterly economic cycles.
+
+**Conclusion:** With state-awareness (5D obs), temporal memory (RNN persistence), and unit-correct friction, the agent is now architecturally equipped to solve the "barcode" problem and move toward stable, institutional-grade allocation.
+

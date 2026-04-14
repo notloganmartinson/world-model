@@ -1,0 +1,9 @@
+yfinance
+pandas
+requests
+torch
+scikit-learn
+matplotlib
+gymnasium
+stable-baselines3
+shimmy

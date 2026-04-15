@@ -21,10 +21,15 @@ def train_agent():
         env, 
         verbose=1, 
         learning_rate=3e-4, 
+        n_steps=2048,           # Collect more data before updating
+        batch_size=512,         # Push larger batches through the GPU
         ent_coef=0.01,
-        batch_size=64,
         device=device,
-        policy_kwargs=dict(log_std_init=-3.0)
+        policy_kwargs=dict(
+            log_std_init=-3.0,
+            # Deep, wide networks for both Policy (pi) and Value (vf)
+            net_arch=[dict(pi=[256, 256, 256], vf=[256, 256, 256])] 
+        )
     )
 
     # 3. Scale Compute with Checkpointing

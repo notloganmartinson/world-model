@@ -1,8 +1,36 @@
+Status: Deprecated (Architectural Post-Mortem)
+Project Goal: Build a reinforcement learning trading agent driven by an internal economic simulator (a "World Model") using macroeconomic data from the FRED API.
+
+The Architecture: This repository implements a traditional 2018 Generative World Model (Ha & Schmidhuber) adapted for financial time-series data:
+
+Perception: A Variational Autoencoder (src/models/vae.py) to compress economic indicators.
+
+Dynamics: An MDN-RNN/LSTM (src/models/lstm.py) to predict the next economic state.
+
+Controller: A PPO Reinforcement Learning Agent (src/train_agent.py) trained entirely inside the LSTM's "dream" environment.
+
+The Result: Catastrophic Out-Of-Sample Failure
+While the PPO agent achieved high reward scores during in-sample training, it catastrophically failed during Out-Of-Sample (OOS) testing, dropping the portfolio value to zero almost immediately (see portfolio_evaluation_oos.png).
+
+Root Cause Analysis (Why this architecture failed)
+After evaluating the model's loss curves and OOS behavior, I diagnosed three fundamental architectural mismatches between generative world models and financial environments:
+
+Misuse of Spatial Compression: VAEs are designed to compress highly redundant, high-dimensional arrays (like 64x64 pixels). Applying a VAE to low-dimensional, dense macroeconomic arrays introduces unnecessary data loss and noise without meaningful latent clustering.
+
+The "Dream Economy" Overfit: Financial markets are highly stochastic (a random walk). Because the LSTM was trained using a reconstruction loss (attempting to predict exact future prices/indicators), it defaulted to a "lazy" prediction mapping. It generated a highly deterministic, perfectly predictable "fake" economy.
+
+Controller Exploitation: The PPO Agent found an exploitable "cheat code" within the LSTM's simulated economy. It overfit to a deterministic environment that does not exist in reality, causing immediate account blowout when exposed to true market volatility.
+
+Next Steps & Pivot
+I am officially deprecating this branch. Predicting exact financial states via generative pixel-style reconstruction is computationally inefficient and mathematically flawed for chaotic systems.
+
+I am pivoting the architecture to a Latent-Predictive Time-Series Representation Model (inspired by modern architectures like JEPA). Instead of a VAE+LSTM predicting exact numbers, the new architecture will utilize a Temporal Convolutional Network (TCN) trained via Contrastive Learning (SimCLR) to classify abstract market regimes, which will serve as the state vector for the RL agent.
+
 # Macroeconomic World Model (V-M-C Framework)
 
 An institutional-grade macroeconomic world model designed to simulate stochastic market "dreams" and train reinforcement learning agents for dynamic, risk-adjusted portfolio allocation.
 
-## 🏗 Architecture (V-M-C Iteration 3)
+## Architecture (V-M-C Iteration 3)
 
 The system is built on a high-fidelity three-tier neural architecture optimized for professional-grade quantitative simulation:
 
@@ -22,7 +50,7 @@ The system is built on a high-fidelity three-tier neural architecture optimized 
     *   **Unit-Correct Friction:** Implements the **Square Root Law of Market Impact** with a 0.05 multiplier, ensuring transaction costs are mathematically significant in Z-score space.
     *   **Mean-Variance Reward:** Trained with a continuous, differentiable reward function: $Reward = Net\_Return - (2.0 \cdot Net\_Return^2)$ to stabilize policy gradients and penalize volatility.
 
-## 🚀 Execution Pipeline
+## Execution Pipeline
 
 The project is designed to be run sequentially:
 
@@ -47,13 +75,13 @@ The project is designed to be run sequentially:
     PYTHONPATH=. python src/evaluate.py
     ```
 
-## 📊 Outputs
+## Outputs
 - `models/`: Trained weights for the VAE (`vae_weights.pth`), RSSM (`lstm_weights.pth`), and PPO Agent (`ppo_portfolio.zip`).
 - `models/checkpoints/`: Model weights saved every 500,000 steps during training.
 - `portfolio_evaluation_oos.png`: A professional 2-panel chart comparing the Agent's cumulative returns (net of fees) against a 60/40 benchmark, alongside its dynamic equity exposure over the OOS period.
 - `src/data/latent_plot.png`: Visualization of the 4D economic regimes projected into 2D space.
 
-## 🛠 Tech Stack
+## Tech Stack
 - **Deep Learning**: PyTorch (Optimized with DMA transfers and asynchronous memory pinning)
 - **Reinforcement Learning**: Gymnasium, Stable-Baselines3 (PPO)
 - **Data**: yfinance, pandas, FRED API

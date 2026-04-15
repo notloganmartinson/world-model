@@ -25,18 +25,20 @@ def evaluate():
 
     # 2. Load OOS Data
     oos_data_path = "src/data/macro_data_daily_oos.pt"
-    if not os.path.exists(oos_data_path):
-        raise FileNotFoundError(f"OOS data not found at {oos_data_path}. Run fetcher.py first.")
+    oos_raw_path = "src/data/macro_data_daily_oos_raw.pt"
+    if not os.path.exists(oos_data_path) or not os.path.exists(oos_raw_path):
+        raise FileNotFoundError(f"OOS data not found. Run fetcher.py first.")
     
     oos_data = torch.load(oos_data_path, map_location=device)
+    oos_raw = torch.load(oos_raw_path, map_location=device)
     
     # ---------------------------------------------------------
     # TEST A: Real Out-of-Sample Backtest (2019 - Present)
     # ---------------------------------------------------------
     print(f"\n[TEST A] Running Real OOS Backtest ({len(oos_data)} trading days)...")
     
-    agent_returns = []
-    bench_returns = []
+    agent_log_returns = []
+    bench_log_returns = []
     allocations = []
     previous_weight = 0.5
     
@@ -48,38 +50,54 @@ def evaluate():
             # Proprioception: Append previous weight to 4D latent vector
             state = np.append(z_oos[t].cpu().numpy(), [previous_weight]).astype(np.float32)
             
-            # Agent prediction
+            # Agent prediction (2D Logits)
             action, _ = agent.predict(state, deterministic=True)
-            stock_weight = np.clip(previous_weight + float(action[0]), 0.0, 1.0)
-            bond_weight = 1.0 - stock_weight
             
-            # Realized returns from OOS data
-            spy_ret = oos_data[t, 0].cpu().item()
-            vustx_ret = oos_data[t, 1].cpu().item()
+            # Stable Softmax conversion for 2-asset allocation
+            exp_preds = np.exp(action - np.max(action))
+            portfolio_weights = exp_preds / np.sum(exp_preds)
+            stock_weight = portfolio_weights[0]
+            bond_weight = portfolio_weights[1]
             
-            # Portfolio Performance
-            raw_ret = (stock_weight * spy_ret) + (bond_weight * vustx_ret)
+            # REALIZED LOG RETURNS from OOS RAW data
+            spy_log_ret = oos_raw[t, 0].cpu().item()
+            vustx_log_ret = oos_raw[t, 1].cpu().item()
             
-            # SQRT Law Friction
+            # CONVERSION: Log -> Arithmetic
+            spy_arith = math.exp(spy_log_ret) - 1
+            vustx_arith = math.exp(vustx_log_ret) - 1
+            
+            # PORTFOLIO ARITHMETIC RETURN
+            raw_arith_ret = (stock_weight * spy_arith) + (bond_weight * vustx_arith)
+            
+            # Quadratic Market Impact (Scale: Arithmetic returns)
             turnover = abs(stock_weight - previous_weight)
-            slippage = (0.0050 * turnover) + (5.0 * (turnover ** 2))
-            net_ret = raw_ret - slippage
+            # 5bps linear + 50bps quadratic slippage
+            slippage = (0.0005 * turnover) + (0.0050 * (turnover ** 2))
+            net_arith_ret = raw_arith_ret - slippage
             
-            # Benchmark (60/40)
-            bench_ret = (0.6 * spy_ret) + (0.4 * vustx_ret)
+            # RE-LOG: Convert back to log return for cumulative aggregation
+            # r_log = ln(1 + R_arith)
+            # We use max to prevent log(negative) in extreme crashes (though rare daily)
+            agent_log_ret = math.log(max(1 + net_arith_ret, 1e-5))
             
-            agent_returns.append(net_ret)
-            bench_returns.append(bench_ret)
+            # Benchmark (60/40) - Also correctly calculated
+            bench_arith_ret = (0.6 * spy_arith) + (0.4 * vustx_arith)
+            bench_log_ret = math.log(max(1 + bench_arith_ret, 1e-5))
+            
+            agent_log_returns.append(agent_log_ret)
+            bench_log_returns.append(bench_log_ret)
             allocations.append(stock_weight)
             previous_weight = stock_weight
 
     # Performance Metrics
-    agent_cum = np.cumsum(agent_returns)
-    bench_cum = np.cumsum(bench_returns)
-    
+    agent_cum = np.cumsum(agent_log_returns)
+    bench_cum = np.cumsum(bench_log_returns)
+
     # Simple Sharpe Approximation (Daily Returns)
-    agent_sharpe = np.sqrt(252) * np.mean(agent_returns) / (np.std(agent_returns) + 1e-9)
-    bench_sharpe = np.sqrt(252) * np.mean(bench_returns) / (np.std(bench_returns) + 1e-9)
+    agent_sharpe = np.sqrt(252) * np.mean(agent_log_returns) / (np.std(agent_log_returns) + 1e-9)
+    bench_sharpe = np.sqrt(252) * np.mean(bench_log_returns) / (np.std(bench_log_returns) + 1e-9)
+
     
     print(f"Agent OOS Sharpe: {agent_sharpe:.2f}")
     print(f"Bench OOS Sharpe: {bench_sharpe:.2f}")

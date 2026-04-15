@@ -38,7 +38,7 @@ models/checkpoints/
 src/data/*.pt
 src/data/*.png
 *.png
-
+research-notes.md
 # Pip/Cache
 pip_cache/
 pip_tmp/

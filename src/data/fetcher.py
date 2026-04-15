@@ -103,26 +103,55 @@ class DataFetcher:
         df_normalized = (df - rolling_mean) / rolling_std
         
         # 6. Drop the first 252 rows that contain NaNs from the rolling window
-        df_normalized = df_normalized.dropna()
+        valid_mask = ~df_normalized.isna().any(axis=1)
+        df_normalized = df_normalized[valid_mask]
+        rolling_mean = rolling_mean[valid_mask]
+        rolling_std = rolling_std[valid_mask]
         
-        # Returns Normalized Dataframe to maintain date-index for split_data
-        return df_normalized
+        # Returns Normalized Dataframe and the stats to maintain date-index for split_data
+        return df_normalized, rolling_mean, rolling_std
 
 if __name__ == "__main__":
     fetcher = DataFetcher()
     df_raw = fetcher.fetch_data()
-    df_normalized = fetcher.get_normalized_tensor(df_raw)
+    df_normalized, df_means, df_stds = fetcher.get_normalized_tensor(df_raw)
     
     # Apply OOS Firewall
-    train_tensor, oos_tensor = fetcher.split_data(df_normalized, split_date="2018-12-31")
+    split_date = "2018-12-31"
+    train_tensor, oos_tensor = fetcher.split_data(df_normalized, split_date=split_date)
     
+    # Split the Rolling Stats for Anchored Un-normalization
+    train_means_tensor, _ = fetcher.split_data(df_means, split_date=split_date)
+    train_stds_tensor, _ = fetcher.split_data(df_stds, split_date=split_date)
+
+    # Also split the RAW log returns for evaluation (to avoid linear combination of log-rets)
+    # We only need SPY and VUSTX for the return calculation
+    df_raw_returns = df_raw[["SPY", "VUSTX"]]
+    # Align with the normalized index (which dropped the first 252 days)
+    df_raw_returns = df_raw_returns.loc[df_normalized.index]
+    
+    _, oos_raw_tensor = fetcher.split_data(df_raw_returns, split_date=split_date)
+    
+    # Save Normalization Metadata (Keep as fallback)
+    train_means_last = df_means.loc[:split_date].iloc[-1]
+    train_stds_last = df_stds.loc[:split_date].iloc[-1]
+    norm_metadata = {
+        "spy_mean": train_means_last["SPY"],
+        "spy_std": train_stds_last["SPY"],
+        "vustx_mean": train_means_last["VUSTX"],
+        "vustx_std": train_stds_last["VUSTX"]
+    }
+
     print("\nProcessed DataFrame Sample (Daily):")
     print(df_normalized.head())
-    print(f"\nTraining Tensor Shape: {train_tensor.shape}")
-    print(f"OOS Testing Tensor Shape: {oos_tensor.shape}")
     
-    # Save for Phase 2
+    # Save for Phases 2-5
     os.makedirs("src/data", exist_ok=True)
     torch.save(train_tensor, "src/data/macro_data_daily_train.pt")
+    torch.save(train_means_tensor, "src/data/macro_data_daily_train_mean.pt")
+    torch.save(train_stds_tensor, "src/data/macro_data_daily_train_std.pt")
     torch.save(oos_tensor, "src/data/macro_data_daily_oos.pt")
-    print("Tensors saved to src/data/macro_data_daily_train.pt and _oos.pt")
+    torch.save(oos_raw_tensor, "src/data/macro_data_daily_oos_raw.pt")
+    torch.save(norm_metadata, "src/data/norm_metadata.pt")
+    
+    print("Tensors and Metadata saved to src/data/")
